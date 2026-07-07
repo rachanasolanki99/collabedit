@@ -1,0 +1,101 @@
+// Prisma schema for CollabEdit — local-first collaborative editor.
+// The Yjs document itself lives in the browser (IndexedDB) as the source of
+// truth. The server persists an append-only log of Yjs *updates* plus named
+// *snapshots* (versions), and owns authorization state (documents + members).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // DIRECT_URL is used by `prisma migrate` (Neon's un-pooled connection).
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime     @default(now())
+
+  memberships  Membership[]
+  updates      DocUpdate[]
+  versions     Version[]
+
+  @@map("users")
+}
+
+model Document {
+  id        String       @id @default(cuid())
+  title     String       @default("Untitled document")
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  members   Membership[]
+  updates   DocUpdate[]
+  versions  Version[]
+
+  @@map("documents")
+}
+
+/// Grants a user a role on a document. Uniqueness guarantees one role per
+/// (document, user). This table is the sole source of authorization truth.
+model Membership {
+  id         String   @id @default(cuid())
+  role       Role     @default(VIEWER)
+  createdAt  DateTime @default(now())
+
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, userId])
+  @@index([userId])
+  @@map("memberships")
+}
+
+/// Append-only log of Yjs binary updates. The WebSocket sync server writes one
+/// row per merged update so a document can be rehydrated server-side and so
+/// offline clients can be caught up via state-vector diffing.
+model DocUpdate {
+  id         String   @id @default(cuid())
+  update     Bytes
+  createdAt  DateTime @default(now())
+
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  authorId   String?
+  author     User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([documentId, createdAt])
+  @@map("doc_updates")
+}
+
+/// A named snapshot for time-travel. Stores the full Yjs document state at
+/// capture time (encodeStateAsUpdate) so it can be restored without replaying
+/// the whole update log.
+model Version {
+  id         String   @id @default(cuid())
+  label      String
+  state      Bytes
+  size       Int
+  createdAt  DateTime @default(now())
+
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([documentId, createdAt])
+  @@map("versions")
+}
