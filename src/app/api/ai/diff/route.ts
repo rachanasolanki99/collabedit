@@ -3,7 +3,7 @@ import { streamText } from "ai";
 import { requireUser } from "@/lib/authz";
 import { handle, json } from "@/lib/http";
 import { aiDiffSchema } from "@/lib/validation";
-import { aiConfigured, aiRateLimited, geminiModel } from "@/lib/ai";
+import { aiConfigured, aiRateLimited, geminiModel, toSafeTextStream } from "@/lib/ai";
 
 export const runtime = "nodejs";
 
@@ -27,5 +27,5 @@ export const POST = handle(async (req: NextRequest) => {
     prompt: `--- PREVIOUS VERSION ---\n${before}\n\n--- CURRENT VERSION ---\n${after}`,
   });
 
-  return result.toTextStreamResponse();
+  return toSafeTextStream(result);
 });
